@@ -1964,8 +1964,8 @@ io.on('connection', (socket) => {
                 config: CONFIG,
                 weather: { current: gameState.currentWeather },
                 warPeace: {
-                    isWar: gameState.warPeaceState.isWar,
-                    nextChange: gameState.warPeaceState.nextChangeTime
+                    isWar: gameState.warPeace.isWar,
+                    nextChange: gameState.warPeace.nextChange
                 }
             });
             
