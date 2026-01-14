@@ -120,6 +120,32 @@ class Database {
                     rank INTEGER,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id)
+                )`,
+                
+                // Table de l'état global du jeu
+                `CREATE TABLE IF NOT EXISTS game_state (
+                    id INTEGER PRIMARY KEY DEFAULT 1,
+                    map_seed INTEGER NOT NULL,
+                    war_period INTEGER DEFAULT 0,
+                    cycle_start_time INTEGER,
+                    next_change INTEGER,
+                    saved_at INTEGER
+                )`,
+                
+                // Table des territoires
+                `CREATE TABLE IF NOT EXISTS territories (
+                    id INTEGER PRIMARY KEY,
+                    owner TEXT,
+                    team TEXT,
+                    units TEXT DEFAULT '[]',
+                    base TEXT
+                )`,
+                
+                // Table des données d'équipes
+                `CREATE TABLE IF NOT EXISTS teams (
+                    id TEXT PRIMARY KEY,
+                    territories INTEGER DEFAULT 0,
+                    total_kills INTEGER DEFAULT 0
                 )`
             ];
 
@@ -574,6 +600,160 @@ class Database {
                 (err) => {
                     if (err) reject(err);
                     else resolve();
+                }
+            );
+        });
+    }
+
+    // ==================== ÉTAT DU JEU GLOBAL ====================
+    
+    // Sauvegarder l'état global du jeu
+    async saveGameState(gameState) {
+        return new Promise((resolve, reject) => {
+            const { mapSeed, warPeriod, cycleStartTime, nextChange } = gameState;
+            
+            this.db.run(
+                `INSERT OR REPLACE INTO game_state (id, map_seed, war_period, cycle_start_time, next_change, saved_at)
+                 VALUES (1, ?, ?, ?, ?, ?)`,
+                [mapSeed, warPeriod ? 1 : 0, cycleStartTime, nextChange, Date.now()],
+                (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                }
+            );
+        });
+    }
+    
+    // Charger l'état global du jeu
+    async loadGameState() {
+        return new Promise((resolve, reject) => {
+            this.db.get(
+                'SELECT * FROM game_state WHERE id = 1',
+                (err, row) => {
+                    if (err) reject(err);
+                    else if (!row) resolve(null);
+                    else {
+                        resolve({
+                            mapSeed: row.map_seed,
+                            warPeriod: row.war_period === 1,
+                            cycleStartTime: row.cycle_start_time,
+                            nextChange: row.next_change,
+                            savedAt: row.saved_at
+                        });
+                    }
+                }
+            );
+        });
+    }
+    
+    // ==================== TERRITOIRES ====================
+    
+    // Sauvegarder tous les territoires
+    async saveAllTerritories(territories) {
+        return new Promise((resolve, reject) => {
+            const stmt = this.db.prepare(
+                `INSERT OR REPLACE INTO territories (id, owner, team, units, base)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            
+            territories.forEach(t => {
+                stmt.run(
+                    t.id,
+                    t.owner || null,
+                    t.team || null,
+                    JSON.stringify(t.units || []),
+                    t.base ? JSON.stringify(t.base) : null
+                );
+            });
+            
+            stmt.finalize((err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    }
+    
+    // Charger tous les territoires
+    async loadAllTerritories() {
+        return new Promise((resolve, reject) => {
+            this.db.all(
+                'SELECT * FROM territories ORDER BY id',
+                (err, rows) => {
+                    if (err) reject(err);
+                    else {
+                        resolve(rows.map(row => ({
+                            id: row.id,
+                            owner: row.owner,
+                            team: row.team,
+                            units: JSON.parse(row.units || '[]'),
+                            base: row.base ? JSON.parse(row.base) : null
+                        })));
+                    }
+                }
+            );
+        });
+    }
+    
+    // Sauvegarder un seul territoire (pour mise à jour rapide)
+    async saveTerritory(territory) {
+        return new Promise((resolve, reject) => {
+            this.db.run(
+                `INSERT OR REPLACE INTO territories (id, owner, team, units, base)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [
+                    territory.id,
+                    territory.owner || null,
+                    territory.team || null,
+                    JSON.stringify(territory.units || []),
+                    territory.base ? JSON.stringify(territory.base) : null
+                ],
+                (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                }
+            );
+        });
+    }
+    
+    // ==================== ÉQUIPES ====================
+    
+    // Sauvegarder les données d'équipes
+    async saveTeams(teams) {
+        return new Promise((resolve, reject) => {
+            const stmt = this.db.prepare(
+                `INSERT OR REPLACE INTO teams (id, territories, total_kills)
+                 VALUES (?, ?, ?)`
+            );
+            
+            Object.keys(teams).forEach(teamId => {
+                const team = teams[teamId];
+                stmt.run(teamId, team.territories || 0, team.totalKills || 0);
+            });
+            
+            stmt.finalize((err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    }
+    
+    // Charger les données d'équipes
+    async loadTeams() {
+        return new Promise((resolve, reject) => {
+            this.db.all(
+                'SELECT * FROM teams',
+                (err, rows) => {
+                    if (err) reject(err);
+                    else {
+                        const teams = {};
+                        rows.forEach(row => {
+                            teams[row.id] = {
+                                territories: row.territories,
+                                totalKills: row.total_kills
+                            };
+                        });
+                        resolve(teams);
+                    }
                 }
             );
         });

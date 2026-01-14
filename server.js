@@ -552,7 +552,7 @@ let gameState = {
     }
 };
 
-const SAVE_FILE = path.join(__dirname, 'gamestate.json');
+// Note: Les sauvegardes sont maintenant dans la base de données SQLite
 
 // ==================== FONCTION HELPER POUR LES DONNÉES D'ÉQUIPES ====================
 function getTeamsData() {
@@ -786,46 +786,62 @@ function emitToOwner(ownerId, eventName, data) {
     });
 }
 
-// ==================== SAUVEGARDE / CHARGEMENT ====================
-function saveGame() {
-    const saveData = {
-        territories: gameState.territories.map(t => ({
+// ==================== SAUVEGARDE / CHARGEMENT (DATABASE) ====================
+async function saveGame() {
+    try {
+        // Sauvegarder l'état global
+        await db.saveGameState({
+            mapSeed: gameState.mapSeed,
+            warPeriod: gameState.warPeace.isWarPeriod,
+            cycleStartTime: gameState.warPeace.cycleStartTime,
+            nextChange: gameState.warPeace.nextChange
+        });
+        
+        // Sauvegarder les territoires
+        await db.saveAllTerritories(gameState.territories.map(t => ({
             id: t.id,
             owner: t.owner,
             team: t.team,
             units: t.units,
             base: t.base
-        })),
-        teams: {
-            red: { territories: gameState.teams.red.territories },
-            blue: { territories: gameState.teams.blue.territories },
-            green: { territories: gameState.teams.green.territories },
-            yellow: { territories: gameState.teams.yellow.territories }
-        },
-        mapSeed: gameState.mapSeed,
-        savedAt: Date.now()
-    };
-    
-    fs.writeFileSync(SAVE_FILE, JSON.stringify(saveData, null, 2));
-    gameState.lastSave = Date.now();
-    console.log('💾 Partie sauvegardée');
+        })));
+        
+        // Sauvegarder les équipes
+        await db.saveTeams({
+            red: { territories: gameState.teams.red.territories, totalKills: gameState.teams.red.totalKills || 0 },
+            blue: { territories: gameState.teams.blue.territories, totalKills: gameState.teams.blue.totalKills || 0 },
+            green: { territories: gameState.teams.green.territories, totalKills: gameState.teams.green.totalKills || 0 },
+            yellow: { territories: gameState.teams.yellow.territories, totalKills: gameState.teams.yellow.totalKills || 0 }
+        });
+        
+        gameState.lastSave = Date.now();
+        console.log('💾 Partie sauvegardée dans la base de données');
+    } catch (err) {
+        console.error('❌ Erreur sauvegarde DB:', err);
+    }
 }
 
-function loadGame() {
+async function loadGame() {
     try {
-        if (fs.existsSync(SAVE_FILE)) {
-            const saveData = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
+        // Charger l'état global
+        const savedState = await db.loadGameState();
+        
+        if (savedState) {
+            gameState.mapSeed = savedState.mapSeed;
+            gameState.territories = generateTerritories(savedState.mapSeed);
+            gameState.warPeace.isWarPeriod = savedState.warPeriod;
+            gameState.warPeace.cycleStartTime = savedState.cycleStartTime;
+            gameState.warPeace.nextChange = savedState.nextChange;
             
-            gameState.mapSeed = saveData.mapSeed;
-            gameState.territories = generateTerritories(saveData.mapSeed);
+            // Charger les territoires
+            const savedTerritories = await db.loadAllTerritories();
             
-            saveData.territories.forEach(saved => {
+            savedTerritories.forEach(saved => {
                 const territory = gameState.territories[saved.id];
                 if (territory) {
                     territory.owner = saved.owner;
                     territory.team = saved.team;
                     territory.units = saved.units || [];
-                    // Mettre à jour la base avec les valeurs de config actuelles
                     if (saved.base) {
                         territory.base = {
                             ...saved.base,
@@ -838,15 +854,20 @@ function loadGame() {
                 }
             });
             
-            Object.keys(saveData.teams).forEach(team => {
-                gameState.teams[team].territories = saveData.teams[team].territories;
+            // Charger les équipes
+            const savedTeams = await db.loadTeams();
+            Object.keys(savedTeams).forEach(team => {
+                if (gameState.teams[team]) {
+                    gameState.teams[team].territories = savedTeams[team].territories || 0;
+                    gameState.teams[team].totalKills = savedTeams[team].totalKills || 0;
+                }
             });
             
-            console.log('📂 Partie chargée depuis la sauvegarde');
+            console.log('📂 Partie chargée depuis la base de données');
             return true;
         }
     } catch (err) {
-        console.error('❌ Erreur chargement sauvegarde:', err);
+        console.error('❌ Erreur chargement DB:', err);
     }
     return false;
 }
@@ -4094,10 +4115,12 @@ async function startServer() {
     }
     
     // Essayer de charger une partie sauvegardée, sinon nouvelle partie
-    const loaded = loadGame();
+    const loaded = await loadGame();
     if (!loaded) {
         console.log('🔄 Aucune sauvegarde trouvée - Nouvelle partie...');
         initNewGame();
+        // Sauvegarder la nouvelle partie dans la DB
+        await saveGame();
     }
     
     // Initialiser les joueurs IA
