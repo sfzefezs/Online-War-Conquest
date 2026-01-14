@@ -1,768 +1,610 @@
 /**
- * WAR TERRITORY - Module Base de Données
- * Gère la persistance des données avec SQLite
+ * WAR TERRITORY - Module Base de Données MySQL
+ * Gère la persistance des données avec MySQL Hostinger
  */
 
-const sqlite3 = require('sqlite3').verbose();
+const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
-const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'warterritory.db');
+// Configuration MySQL Hostinger
+const DB_CONFIG = {
+    host: process.env.DB_HOST || 'srv1590.hstgr.io',
+    user: process.env.DB_USER || 'u568676681_cam',
+    password: process.env.DB_PASSWORD || 'Camais6969.',
+    database: process.env.DB_NAME || 'u568676681_cam',
+    port: process.env.DB_PORT || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+};
 
 class Database {
     constructor() {
-        this.db = null;
+        this.pool = null;
     }
 
     // Initialiser la connexion à la base de données
-    init() {
-        return new Promise((resolve, reject) => {
-            this.db = new sqlite3.Database(DB_PATH, (err) => {
-                if (err) {
-                    console.error('❌ Erreur connexion DB:', err);
-                    reject(err);
-                } else {
-                    console.log('✅ Base de données connectée');
-                    this.createTables()
-                        .then(() => resolve())
-                        .catch(reject);
-                }
-            });
-        });
+    async init() {
+        try {
+            this.pool = mysql.createPool(DB_CONFIG);
+            
+            // Tester la connexion
+            const connection = await this.pool.getConnection();
+            console.log('✅ Connecté à MySQL Hostinger');
+            connection.release();
+            
+            // Créer les tables
+            await this.createTables();
+            
+            return true;
+        } catch (err) {
+            console.error('❌ Erreur connexion MySQL:', err.message);
+            throw err;
+        }
     }
 
     // Créer les tables si elles n'existent pas
-    createTables() {
-        return new Promise((resolve, reject) => {
-            const queries = [
-                // Table des utilisateurs
-                `CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    email TEXT UNIQUE,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_login DATETIME,
-                    is_online INTEGER DEFAULT 0
-                )`,
-                
-                // Table des statistiques joueur
-                `CREATE TABLE IF NOT EXISTS player_stats (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER UNIQUE NOT NULL,
-                    total_kills INTEGER DEFAULT 0,
-                    total_deaths INTEGER DEFAULT 0,
-                    territories_captured INTEGER DEFAULT 0,
-                    buildings_built INTEGER DEFAULT 0,
-                    battles_won INTEGER DEFAULT 0,
-                    battles_lost INTEGER DEFAULT 0,
-                    total_gold_earned INTEGER DEFAULT 0,
-                    total_food_earned INTEGER DEFAULT 0,
-                    games_played INTEGER DEFAULT 0,
-                    total_play_time INTEGER DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table des données de jeu sauvegardées
-                `CREATE TABLE IF NOT EXISTS player_game_data (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    team TEXT,
-                    gold INTEGER DEFAULT 500,
-                    food INTEGER DEFAULT 300,
-                    has_base INTEGER DEFAULT 0,
-                    base_territory_id INTEGER,
-                    kills INTEGER DEFAULT 0,
-                    technologies TEXT DEFAULT '{}',
-                    last_save DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table des unités du joueur
-                `CREATE TABLE IF NOT EXISTS player_units (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    unit_id TEXT NOT NULL,
-                    unit_type TEXT NOT NULL,
-                    health INTEGER,
-                    territory_id INTEGER,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table des bâtiments du joueur
-                `CREATE TABLE IF NOT EXISTS player_buildings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    building_id TEXT NOT NULL,
-                    building_type TEXT NOT NULL,
-                    territory_id INTEGER NOT NULL,
-                    health INTEGER,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table des sessions actives
-                `CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    token TEXT UNIQUE NOT NULL,
-                    socket_id TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    expires_at DATETIME,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table du classement global
-                `CREATE TABLE IF NOT EXISTS leaderboard (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER UNIQUE NOT NULL,
-                    username TEXT NOT NULL,
-                    total_score REAL DEFAULT 0,
-                    rank INTEGER,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )`,
-                
-                // Table de l'état global du jeu
-                `CREATE TABLE IF NOT EXISTS game_state (
-                    id INTEGER PRIMARY KEY DEFAULT 1,
-                    map_seed INTEGER NOT NULL,
-                    war_period INTEGER DEFAULT 0,
-                    cycle_start_time INTEGER,
-                    next_change INTEGER,
-                    saved_at INTEGER
-                )`,
-                
-                // Table des territoires
-                `CREATE TABLE IF NOT EXISTS territories (
-                    id INTEGER PRIMARY KEY,
-                    owner TEXT,
-                    team TEXT,
-                    units TEXT DEFAULT '[]',
-                    base TEXT
-                )`,
-                
-                // Table des données d'équipes
-                `CREATE TABLE IF NOT EXISTS teams (
-                    id TEXT PRIMARY KEY,
-                    territories INTEGER DEFAULT 0,
-                    total_kills INTEGER DEFAULT 0
-                )`
-            ];
+    async createTables() {
+        const queries = [
+            // Table des utilisateurs
+            `CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                email VARCHAR(100) UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP NULL,
+                is_online TINYINT DEFAULT 0
+            )`,
+            
+            // Table des statistiques joueur
+            `CREATE TABLE IF NOT EXISTS player_stats (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNIQUE NOT NULL,
+                total_kills INT DEFAULT 0,
+                total_deaths INT DEFAULT 0,
+                territories_captured INT DEFAULT 0,
+                buildings_built INT DEFAULT 0,
+                battles_won INT DEFAULT 0,
+                battles_lost INT DEFAULT 0,
+                total_gold_earned INT DEFAULT 0,
+                total_food_earned INT DEFAULT 0,
+                games_played INT DEFAULT 0,
+                total_play_time INT DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table des données de jeu sauvegardées
+            `CREATE TABLE IF NOT EXISTS player_game_data (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                team VARCHAR(20),
+                gold INT DEFAULT 500,
+                food INT DEFAULT 300,
+                has_base TINYINT DEFAULT 0,
+                base_territory_id INT,
+                kills INT DEFAULT 0,
+                technologies JSON,
+                last_save TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table des unités du joueur
+            `CREATE TABLE IF NOT EXISTS player_units (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                unit_id VARCHAR(100) NOT NULL,
+                unit_type VARCHAR(50) NOT NULL,
+                health INT,
+                territory_id INT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table des bâtiments du joueur
+            `CREATE TABLE IF NOT EXISTS player_buildings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                building_id VARCHAR(100) NOT NULL,
+                building_type VARCHAR(50) NOT NULL,
+                territory_id INT NOT NULL,
+                health INT,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table des sessions actives
+            `CREATE TABLE IF NOT EXISTS sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                token VARCHAR(255) UNIQUE NOT NULL,
+                socket_id VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table du classement global
+            `CREATE TABLE IF NOT EXISTS leaderboard (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNIQUE NOT NULL,
+                username VARCHAR(50) NOT NULL,
+                total_score DECIMAL(15,2) DEFAULT 0,
+                rank_position INT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )`,
+            
+            // Table de l'état global du jeu
+            `CREATE TABLE IF NOT EXISTS game_state (
+                id INT PRIMARY KEY DEFAULT 1,
+                map_seed INT NOT NULL,
+                war_period TINYINT DEFAULT 0,
+                cycle_start_time BIGINT,
+                next_change BIGINT,
+                saved_at BIGINT
+            )`,
+            
+            // Table des territoires
+            `CREATE TABLE IF NOT EXISTS territories (
+                id INT PRIMARY KEY,
+                owner VARCHAR(100),
+                team VARCHAR(20),
+                units JSON,
+                base JSON
+            )`,
+            
+            // Table des données d'équipes
+            `CREATE TABLE IF NOT EXISTS teams (
+                id VARCHAR(20) PRIMARY KEY,
+                territories INT DEFAULT 0,
+                total_kills INT DEFAULT 0
+            )`
+        ];
 
-            this.db.serialize(() => {
-                let completed = 0;
-                queries.forEach((query, index) => {
-                    this.db.run(query, (err) => {
-                        if (err) {
-                            console.error(`❌ Erreur création table ${index}:`, err);
-                        }
-                        completed++;
-                        if (completed === queries.length) {
-                            console.log('📊 Tables de base de données créées');
-                            resolve();
-                        }
-                    });
-                });
-            });
-        });
+        for (const query of queries) {
+            try {
+                await this.pool.execute(query);
+            } catch (err) {
+                console.error('❌ Erreur création table:', err.message);
+            }
+        }
+        
+        console.log('📊 Tables MySQL créées/vérifiées');
     }
 
     // ==================== UTILISATEURS ====================
     
     // Créer un nouvel utilisateur
     async createUser(username, password, email = null) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Hasher le mot de passe
-                const hashedPassword = await bcrypt.hash(password, 10);
-                
-                this.db.run(
-                    'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
-                    [username, hashedPassword, email],
-                    function(err) {
-                        if (err) {
-                            if (err.message.includes('UNIQUE constraint failed')) {
-                                reject(new Error('Ce nom d\'utilisateur ou email existe déjà'));
-                            } else {
-                                reject(err);
-                            }
-                        } else {
-                            const userId = this.lastID;
-                            // Créer les stats par défaut
-                            db.db.run(
-                                'INSERT INTO player_stats (user_id) VALUES (?)',
-                                [userId],
-                                (err) => {
-                                    if (err) console.error('Erreur création stats:', err);
-                                }
-                            );
-                            // Créer les données de jeu par défaut
-                            db.db.run(
-                                'INSERT INTO player_game_data (user_id) VALUES (?)',
-                                [userId],
-                                (err) => {
-                                    if (err) console.error('Erreur création game data:', err);
-                                }
-                            );
-                            resolve({ id: userId, username });
-                        }
-                    }
-                );
-            } catch (err) {
-                reject(err);
+        try {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            
+            const [result] = await this.pool.execute(
+                'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
+                [username, hashedPassword, email]
+            );
+            
+            const userId = result.insertId;
+            
+            // Créer les stats par défaut
+            await this.pool.execute(
+                'INSERT INTO player_stats (user_id) VALUES (?)',
+                [userId]
+            );
+            
+            // Créer les données de jeu par défaut
+            await this.pool.execute(
+                'INSERT INTO player_game_data (user_id, technologies) VALUES (?, ?)',
+                [userId, JSON.stringify({})]
+            );
+            
+            return { id: userId, username };
+        } catch (err) {
+            if (err.code === 'ER_DUP_ENTRY') {
+                throw new Error('Ce nom d\'utilisateur ou email existe déjà');
             }
-        });
+            throw err;
+        }
     }
 
     // Authentifier un utilisateur
     async authenticateUser(username, password) {
-        return new Promise((resolve, reject) => {
-            this.db.get(
-                'SELECT * FROM users WHERE username = ?',
-                [username],
-                async (err, user) => {
-                    if (err) {
-                        reject(err);
-                    } else if (!user) {
-                        reject(new Error('Utilisateur non trouvé'));
-                    } else {
-                        const validPassword = await bcrypt.compare(password, user.password);
-                        if (validPassword) {
-                            // Mettre à jour last_login
-                            this.db.run(
-                                'UPDATE users SET last_login = CURRENT_TIMESTAMP, is_online = 1 WHERE id = ?',
-                                [user.id]
-                            );
-                            resolve({
-                                id: user.id,
-                                username: user.username,
-                                email: user.email
-                            });
-                        } else {
-                            reject(new Error('Mot de passe incorrect'));
-                        }
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM users WHERE username = ?',
+            [username]
+        );
+        
+        if (rows.length === 0) {
+            throw new Error('Utilisateur non trouvé');
+        }
+        
+        const user = rows[0];
+        const validPassword = await bcrypt.compare(password, user.password);
+        
+        if (!validPassword) {
+            throw new Error('Mot de passe incorrect');
+        }
+        
+        // Mettre à jour last_login
+        await this.pool.execute(
+            'UPDATE users SET last_login = NOW(), is_online = 1 WHERE id = ?',
+            [user.id]
+        );
+        
+        return {
+            id: user.id,
+            username: user.username,
+            email: user.email
+        };
     }
 
     // Déconnecter un utilisateur
     async logoutUser(userId) {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                'UPDATE users SET is_online = 0 WHERE id = ?',
-                [userId],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            'UPDATE users SET is_online = 0 WHERE id = ?',
+            [userId]
+        );
     }
 
     // ==================== DONNÉES DE JEU ====================
     
     // Sauvegarder les données de jeu d'un joueur
     async savePlayerGameData(userId, data) {
-        return new Promise((resolve, reject) => {
-            const { team, gold, food, hasBase, baseTerritoryId, kills, technologies } = data;
-            
-            this.db.run(
-                `UPDATE player_game_data SET 
-                    team = ?, gold = ?, food = ?, has_base = ?, 
-                    base_territory_id = ?, kills = ?, technologies = ?,
-                    last_save = CURRENT_TIMESTAMP
-                WHERE user_id = ?`,
-                [team, gold, food, hasBase ? 1 : 0, baseTerritoryId, kills, 
-                 JSON.stringify(technologies || {}), userId],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        const { team, gold, food, hasBase, baseTerritoryId, kills, technologies } = data;
+        
+        await this.pool.execute(
+            `UPDATE player_game_data SET 
+                team = ?, gold = ?, food = ?, has_base = ?, 
+                base_territory_id = ?, kills = ?, technologies = ?,
+                last_save = NOW()
+            WHERE user_id = ?`,
+            [team, gold, food, hasBase ? 1 : 0, baseTerritoryId, kills, 
+             JSON.stringify(technologies || {}), userId]
+        );
     }
 
     // Charger les données de jeu d'un joueur
     async loadPlayerGameData(userId) {
-        return new Promise((resolve, reject) => {
-            this.db.get(
-                'SELECT * FROM player_game_data WHERE user_id = ?',
-                [userId],
-                (err, row) => {
-                    if (err) reject(err);
-                    else if (!row) resolve(null);
-                    else {
-                        resolve({
-                            team: row.team,
-                            gold: row.gold,
-                            food: row.food,
-                            hasBase: row.has_base === 1,
-                            baseTerritoryId: row.base_territory_id,
-                            kills: row.kills,
-                            technologies: JSON.parse(row.technologies || '{}')
-                        });
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM player_game_data WHERE user_id = ?',
+            [userId]
+        );
+        
+        if (rows.length === 0) return null;
+        
+        const row = rows[0];
+        return {
+            team: row.team,
+            gold: row.gold,
+            food: row.food,
+            hasBase: row.has_base === 1,
+            baseTerritoryId: row.base_territory_id,
+            kills: row.kills,
+            technologies: typeof row.technologies === 'string' 
+                ? JSON.parse(row.technologies) 
+                : (row.technologies || {})
+        };
     }
 
     // ==================== UNITÉS ====================
     
     // Sauvegarder les unités d'un joueur
     async savePlayerUnits(userId, units) {
-        return new Promise((resolve, reject) => {
-            // Supprimer les anciennes unités
-            this.db.run('DELETE FROM player_units WHERE user_id = ?', [userId], (err) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
-                
-                if (!units || units.length === 0) {
-                    resolve();
-                    return;
-                }
-
-                const stmt = this.db.prepare(
-                    'INSERT INTO player_units (user_id, unit_id, unit_type, health, territory_id) VALUES (?, ?, ?, ?, ?)'
-                );
-                
-                units.forEach(unit => {
-                    stmt.run(userId, unit.id, unit.type, unit.health, unit.territoryId);
-                });
-                
-                stmt.finalize((err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-        });
+        // Supprimer les anciennes unités
+        await this.pool.execute('DELETE FROM player_units WHERE user_id = ?', [userId]);
+        
+        if (!units || units.length === 0) return;
+        
+        for (const unit of units) {
+            await this.pool.execute(
+                'INSERT INTO player_units (user_id, unit_id, unit_type, health, territory_id) VALUES (?, ?, ?, ?, ?)',
+                [userId, unit.id, unit.type, unit.health, unit.territoryId]
+            );
+        }
     }
 
     // Charger les unités d'un joueur
     async loadPlayerUnits(userId) {
-        return new Promise((resolve, reject) => {
-            this.db.all(
-                'SELECT * FROM player_units WHERE user_id = ?',
-                [userId],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else {
-                        resolve(rows.map(row => ({
-                            id: row.unit_id,
-                            type: row.unit_type,
-                            health: row.health,
-                            territoryId: row.territory_id
-                        })));
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM player_units WHERE user_id = ?',
+            [userId]
+        );
+        
+        return rows.map(row => ({
+            id: row.unit_id,
+            type: row.unit_type,
+            health: row.health,
+            territoryId: row.territory_id
+        }));
     }
 
     // ==================== BÂTIMENTS ====================
     
     // Sauvegarder les bâtiments d'un joueur
     async savePlayerBuildings(userId, buildings) {
-        return new Promise((resolve, reject) => {
-            this.db.run('DELETE FROM player_buildings WHERE user_id = ?', [userId], (err) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
-                
-                if (!buildings || buildings.length === 0) {
-                    resolve();
-                    return;
-                }
-
-                const stmt = this.db.prepare(
-                    'INSERT INTO player_buildings (user_id, building_id, building_type, territory_id, health) VALUES (?, ?, ?, ?, ?)'
-                );
-                
-                buildings.forEach(building => {
-                    stmt.run(userId, building.id, building.type, building.territoryId, building.health);
-                });
-                
-                stmt.finalize((err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-        });
+        await this.pool.execute('DELETE FROM player_buildings WHERE user_id = ?', [userId]);
+        
+        if (!buildings || buildings.length === 0) return;
+        
+        for (const building of buildings) {
+            await this.pool.execute(
+                'INSERT INTO player_buildings (user_id, building_id, building_type, territory_id, health) VALUES (?, ?, ?, ?, ?)',
+                [userId, building.id, building.type, building.territoryId, building.health]
+            );
+        }
     }
 
     // Charger les bâtiments d'un joueur
     async loadPlayerBuildings(userId) {
-        return new Promise((resolve, reject) => {
-            this.db.all(
-                'SELECT * FROM player_buildings WHERE user_id = ?',
-                [userId],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else {
-                        resolve(rows.map(row => ({
-                            id: row.building_id,
-                            type: row.building_type,
-                            territoryId: row.territory_id,
-                            health: row.health
-                        })));
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM player_buildings WHERE user_id = ?',
+            [userId]
+        );
+        
+        return rows.map(row => ({
+            id: row.building_id,
+            type: row.building_type,
+            territoryId: row.territory_id,
+            health: row.health
+        }));
     }
 
     // ==================== STATISTIQUES ====================
     
     // Mettre à jour les statistiques d'un joueur
     async updatePlayerStats(userId, stats) {
-        return new Promise((resolve, reject) => {
-            const fields = [];
-            const values = [];
-            
-            if (stats.kills !== undefined) {
-                fields.push('total_kills = total_kills + ?');
-                values.push(stats.kills);
-            }
-            if (stats.deaths !== undefined) {
-                fields.push('total_deaths = total_deaths + ?');
-                values.push(stats.deaths);
-            }
-            if (stats.territoriesCaptured !== undefined) {
-                fields.push('territories_captured = territories_captured + ?');
-                values.push(stats.territoriesCaptured);
-            }
-            if (stats.buildingsBuilt !== undefined) {
-                fields.push('buildings_built = buildings_built + ?');
-                values.push(stats.buildingsBuilt);
-            }
-            if (stats.battlesWon !== undefined) {
-                fields.push('battles_won = battles_won + ?');
-                values.push(stats.battlesWon);
-            }
-            if (stats.battlesLost !== undefined) {
-                fields.push('battles_lost = battles_lost + ?');
-                values.push(stats.battlesLost);
-            }
-            if (stats.goldEarned !== undefined) {
-                fields.push('total_gold_earned = total_gold_earned + ?');
-                values.push(stats.goldEarned);
-            }
-            if (stats.foodEarned !== undefined) {
-                fields.push('total_food_earned = total_food_earned + ?');
-                values.push(stats.foodEarned);
-            }
-            if (stats.playTime !== undefined) {
-                fields.push('total_play_time = total_play_time + ?');
-                values.push(stats.playTime);
-            }
-            
-            if (fields.length === 0) {
-                resolve();
-                return;
-            }
-            
-            values.push(userId);
-            
-            this.db.run(
-                `UPDATE player_stats SET ${fields.join(', ')} WHERE user_id = ?`,
-                values,
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        const updates = [];
+        const values = [];
+        
+        if (stats.kills !== undefined) {
+            updates.push('total_kills = total_kills + ?');
+            values.push(stats.kills);
+        }
+        if (stats.deaths !== undefined) {
+            updates.push('total_deaths = total_deaths + ?');
+            values.push(stats.deaths);
+        }
+        if (stats.territoriesCaptured !== undefined) {
+            updates.push('territories_captured = territories_captured + ?');
+            values.push(stats.territoriesCaptured);
+        }
+        if (stats.buildingsBuilt !== undefined) {
+            updates.push('buildings_built = buildings_built + ?');
+            values.push(stats.buildingsBuilt);
+        }
+        if (stats.battlesWon !== undefined) {
+            updates.push('battles_won = battles_won + ?');
+            values.push(stats.battlesWon);
+        }
+        if (stats.battlesLost !== undefined) {
+            updates.push('battles_lost = battles_lost + ?');
+            values.push(stats.battlesLost);
+        }
+        if (stats.goldEarned !== undefined) {
+            updates.push('total_gold_earned = total_gold_earned + ?');
+            values.push(stats.goldEarned);
+        }
+        if (stats.foodEarned !== undefined) {
+            updates.push('total_food_earned = total_food_earned + ?');
+            values.push(stats.foodEarned);
+        }
+        if (stats.playTime !== undefined) {
+            updates.push('total_play_time = total_play_time + ?');
+            values.push(stats.playTime);
+        }
+        
+        if (updates.length === 0) return;
+        
+        values.push(userId);
+        
+        await this.pool.execute(
+            `UPDATE player_stats SET ${updates.join(', ')} WHERE user_id = ?`,
+            values
+        );
     }
 
     // Obtenir les statistiques d'un joueur
     async getPlayerStats(userId) {
-        return new Promise((resolve, reject) => {
-            this.db.get(
-                'SELECT * FROM player_stats WHERE user_id = ?',
-                [userId],
-                (err, row) => {
-                    if (err) reject(err);
-                    else resolve(row);
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM player_stats WHERE user_id = ?',
+            [userId]
+        );
+        return rows[0] || null;
     }
 
     // ==================== CLASSEMENT ====================
     
     // Mettre à jour le classement
     async updateLeaderboard(userId, username, score) {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                `INSERT INTO leaderboard (user_id, username, total_score, updated_at) 
-                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                 ON CONFLICT(user_id) DO UPDATE SET 
-                    total_score = ?, username = ?, updated_at = CURRENT_TIMESTAMP`,
-                [userId, username, score, score, username],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            `INSERT INTO leaderboard (user_id, username, total_score) 
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+                total_score = ?, username = ?, updated_at = NOW()`,
+            [userId, username, score, score, username]
+        );
     }
 
     // Obtenir le classement global
     async getGlobalLeaderboard(limit = 100) {
-        return new Promise((resolve, reject) => {
-            this.db.all(
-                `SELECT user_id, username, total_score,
-                    (SELECT COUNT(*) + 1 FROM leaderboard l2 WHERE l2.total_score > leaderboard.total_score) as rank
-                 FROM leaderboard 
-                 ORDER BY total_score DESC 
-                 LIMIT ?`,
-                [limit],
-                (err, rows) => {
-                    if (err) reject(err);
-                    else resolve(rows);
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            `SELECT user_id, username, total_score,
+                (SELECT COUNT(*) + 1 FROM leaderboard l2 WHERE l2.total_score > leaderboard.total_score) as rank_position
+             FROM leaderboard 
+             ORDER BY total_score DESC 
+             LIMIT ?`,
+            [limit]
+        );
+        return rows;
     }
 
     // ==================== SESSIONS ====================
     
     // Créer une session
     async createSession(userId, token, socketId = null) {
-        return new Promise((resolve, reject) => {
-            const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 jours
-            
-            this.db.run(
-                'INSERT INTO sessions (user_id, token, socket_id, expires_at) VALUES (?, ?, ?, ?)',
-                [userId, token, socketId, expiresAt.toISOString()],
-                function(err) {
-                    if (err) reject(err);
-                    else resolve({ id: this.lastID, token });
-                }
-            );
-        });
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 jours
+        
+        const [result] = await this.pool.execute(
+            'INSERT INTO sessions (user_id, token, socket_id, expires_at) VALUES (?, ?, ?, ?)',
+            [userId, token, socketId, expiresAt]
+        );
+        
+        return { id: result.insertId, token };
     }
 
     // Valider une session
     async validateSession(token) {
-        return new Promise((resolve, reject) => {
-            this.db.get(
-                `SELECT s.*, u.username FROM sessions s 
-                 JOIN users u ON s.user_id = u.id 
-                 WHERE s.token = ? AND s.expires_at > datetime('now')`,
-                [token],
-                (err, row) => {
-                    if (err) reject(err);
-                    else resolve(row);
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            `SELECT s.*, u.username FROM sessions s 
+             JOIN users u ON s.user_id = u.id 
+             WHERE s.token = ? AND s.expires_at > NOW()`,
+            [token]
+        );
+        return rows[0] || null;
     }
 
     // Mettre à jour le socket_id d'une session
     async updateSessionSocket(token, socketId) {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                'UPDATE sessions SET socket_id = ? WHERE token = ?',
-                [socketId, token],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            'UPDATE sessions SET socket_id = ? WHERE token = ?',
+            [socketId, token]
+        );
     }
 
     // Supprimer une session
     async deleteSession(token) {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                'DELETE FROM sessions WHERE token = ?',
-                [token],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            'DELETE FROM sessions WHERE token = ?',
+            [token]
+        );
     }
 
     // Nettoyer les sessions expirées
     async cleanExpiredSessions() {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                "DELETE FROM sessions WHERE expires_at < datetime('now')",
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            'DELETE FROM sessions WHERE expires_at < NOW()'
+        );
     }
 
     // ==================== ÉTAT DU JEU GLOBAL ====================
     
     // Sauvegarder l'état global du jeu
     async saveGameState(gameState) {
-        return new Promise((resolve, reject) => {
-            const { mapSeed, warPeriod, cycleStartTime, nextChange } = gameState;
-            
-            this.db.run(
-                `INSERT OR REPLACE INTO game_state (id, map_seed, war_period, cycle_start_time, next_change, saved_at)
-                 VALUES (1, ?, ?, ?, ?, ?)`,
-                [mapSeed, warPeriod ? 1 : 0, cycleStartTime, nextChange, Date.now()],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        const { mapSeed, warPeriod, cycleStartTime, nextChange } = gameState;
+        
+        await this.pool.execute(
+            `INSERT INTO game_state (id, map_seed, war_period, cycle_start_time, next_change, saved_at)
+             VALUES (1, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+                map_seed = ?, war_period = ?, cycle_start_time = ?, next_change = ?, saved_at = ?`,
+            [mapSeed, warPeriod ? 1 : 0, cycleStartTime, nextChange, Date.now(),
+             mapSeed, warPeriod ? 1 : 0, cycleStartTime, nextChange, Date.now()]
+        );
     }
     
     // Charger l'état global du jeu
     async loadGameState() {
-        return new Promise((resolve, reject) => {
-            this.db.get(
-                'SELECT * FROM game_state WHERE id = 1',
-                (err, row) => {
-                    if (err) reject(err);
-                    else if (!row) resolve(null);
-                    else {
-                        resolve({
-                            mapSeed: row.map_seed,
-                            warPeriod: row.war_period === 1,
-                            cycleStartTime: row.cycle_start_time,
-                            nextChange: row.next_change,
-                            savedAt: row.saved_at
-                        });
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM game_state WHERE id = 1'
+        );
+        
+        if (rows.length === 0) return null;
+        
+        const row = rows[0];
+        return {
+            mapSeed: row.map_seed,
+            warPeriod: row.war_period === 1,
+            cycleStartTime: row.cycle_start_time,
+            nextChange: row.next_change,
+            savedAt: row.saved_at
+        };
     }
     
     // ==================== TERRITOIRES ====================
     
     // Sauvegarder tous les territoires
     async saveAllTerritories(territories) {
-        return new Promise((resolve, reject) => {
-            const stmt = this.db.prepare(
-                `INSERT OR REPLACE INTO territories (id, owner, team, units, base)
-                 VALUES (?, ?, ?, ?, ?)`
+        for (const t of territories) {
+            await this.pool.execute(
+                `INSERT INTO territories (id, owner, team, units, base)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE 
+                    owner = ?, team = ?, units = ?, base = ?`,
+                [t.id, t.owner || null, t.team || null, 
+                 JSON.stringify(t.units || []), 
+                 t.base ? JSON.stringify(t.base) : null,
+                 t.owner || null, t.team || null,
+                 JSON.stringify(t.units || []),
+                 t.base ? JSON.stringify(t.base) : null]
             );
-            
-            territories.forEach(t => {
-                stmt.run(
-                    t.id,
-                    t.owner || null,
-                    t.team || null,
-                    JSON.stringify(t.units || []),
-                    t.base ? JSON.stringify(t.base) : null
-                );
-            });
-            
-            stmt.finalize((err) => {
-                if (err) reject(err);
-                else resolve();
-            });
-        });
+        }
     }
     
     // Charger tous les territoires
     async loadAllTerritories() {
-        return new Promise((resolve, reject) => {
-            this.db.all(
-                'SELECT * FROM territories ORDER BY id',
-                (err, rows) => {
-                    if (err) reject(err);
-                    else {
-                        resolve(rows.map(row => ({
-                            id: row.id,
-                            owner: row.owner,
-                            team: row.team,
-                            units: JSON.parse(row.units || '[]'),
-                            base: row.base ? JSON.parse(row.base) : null
-                        })));
-                    }
-                }
-            );
-        });
+        const [rows] = await this.pool.execute(
+            'SELECT * FROM territories ORDER BY id'
+        );
+        
+        return rows.map(row => ({
+            id: row.id,
+            owner: row.owner,
+            team: row.team,
+            units: typeof row.units === 'string' ? JSON.parse(row.units) : (row.units || []),
+            base: row.base ? (typeof row.base === 'string' ? JSON.parse(row.base) : row.base) : null
+        }));
     }
     
-    // Sauvegarder un seul territoire (pour mise à jour rapide)
+    // Sauvegarder un seul territoire
     async saveTerritory(territory) {
-        return new Promise((resolve, reject) => {
-            this.db.run(
-                `INSERT OR REPLACE INTO territories (id, owner, team, units, base)
-                 VALUES (?, ?, ?, ?, ?)`,
-                [
-                    territory.id,
-                    territory.owner || null,
-                    territory.team || null,
-                    JSON.stringify(territory.units || []),
-                    territory.base ? JSON.stringify(territory.base) : null
-                ],
-                (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                }
-            );
-        });
+        await this.pool.execute(
+            `INSERT INTO territories (id, owner, team, units, base)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+                owner = ?, team = ?, units = ?, base = ?`,
+            [territory.id, territory.owner || null, territory.team || null,
+             JSON.stringify(territory.units || []),
+             territory.base ? JSON.stringify(territory.base) : null,
+             territory.owner || null, territory.team || null,
+             JSON.stringify(territory.units || []),
+             territory.base ? JSON.stringify(territory.base) : null]
+        );
     }
     
     // ==================== ÉQUIPES ====================
     
     // Sauvegarder les données d'équipes
     async saveTeams(teams) {
-        return new Promise((resolve, reject) => {
-            const stmt = this.db.prepare(
-                `INSERT OR REPLACE INTO teams (id, territories, total_kills)
-                 VALUES (?, ?, ?)`
+        for (const teamId of Object.keys(teams)) {
+            const team = teams[teamId];
+            await this.pool.execute(
+                `INSERT INTO teams (id, territories, total_kills)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE 
+                    territories = ?, total_kills = ?`,
+                [teamId, team.territories || 0, team.totalKills || 0,
+                 team.territories || 0, team.totalKills || 0]
             );
-            
-            Object.keys(teams).forEach(teamId => {
-                const team = teams[teamId];
-                stmt.run(teamId, team.territories || 0, team.totalKills || 0);
-            });
-            
-            stmt.finalize((err) => {
-                if (err) reject(err);
-                else resolve();
-            });
-        });
+        }
     }
     
     // Charger les données d'équipes
     async loadTeams() {
-        return new Promise((resolve, reject) => {
-            this.db.all(
-                'SELECT * FROM teams',
-                (err, rows) => {
-                    if (err) reject(err);
-                    else {
-                        const teams = {};
-                        rows.forEach(row => {
-                            teams[row.id] = {
-                                territories: row.territories,
-                                totalKills: row.total_kills
-                            };
-                        });
-                        resolve(teams);
-                    }
-                }
-            );
+        const [rows] = await this.pool.execute('SELECT * FROM teams');
+        
+        const teams = {};
+        rows.forEach(row => {
+            teams[row.id] = {
+                territories: row.territories,
+                totalKills: row.total_kills
+            };
         });
+        return teams;
     }
 
     // Fermer la connexion
-    close() {
-        if (this.db) {
-            this.db.close();
+    async close() {
+        if (this.pool) {
+            await this.pool.end();
         }
     }
 }
