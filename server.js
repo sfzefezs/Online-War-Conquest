@@ -1943,8 +1943,8 @@ io.on('connection', (socket) => {
                 config: CONFIG,
                 weather: { current: gameState.currentWeather },
                 warPeace: {
-                    isWar: gameState.warPeace.isWar,
-                    nextChange: gameState.warPeace.nextChange
+                    isWar: gameState.warPeaceState.isWar,
+                    nextChange: gameState.warPeaceState.nextChangeTime
                 }
             });
             
@@ -2723,59 +2723,10 @@ io.on('connection', (socket) => {
                 } catch (err) {
                     console.error('Erreur sauvegarde déconnexion:', err);
                 }
-            } else {
-                // Joueur invité (non authentifié) - supprimer toutes ses données
-                console.log(`🗑️ Suppression des données du joueur invité ${player.name}...`);
-                
-                // Supprimer les bases du joueur invité
-                gameState.territories.forEach(territory => {
-                    if (territory.owner === socket.id) {
-                        // Supprimer la base si elle existe
-                        if (territory.base) {
-                            delete territory.base;
-                            console.log(`  🏰 Base supprimée sur territoire ${territory.id}`);
-                        }
-                        // Supprimer les unités du joueur
-                        if (territory.units) {
-                            territory.units = territory.units.filter(u => u.owner !== socket.id);
-                        }
-                        // Remettre le territoire en neutre
-                        territory.owner = null;
-                        territory.team = null;
-                    } else if (territory.units) {
-                        // Supprimer les unités du joueur invité sur d'autres territoires
-                        territory.units = territory.units.filter(u => u.owner !== socket.id);
-                    }
-                });
-                
-                // Supprimer les mouvements en cours du joueur invité
-                gameState.movingUnits = gameState.movingUnits.filter(m => m.owner !== socket.id);
-                
-                // Mettre à jour les territoires pour tous les joueurs
-                io.emit('full_map_update', {
-                    territories: gameState.territories.map(t => ({
-                        id: t.id,
-                        points: t.points,
-                        team: t.team,
-                        owner: t.owner,
-                        base: t.base,
-                        units: t.units || [],
-                        neighbors: t.neighbors,
-                        centerX: t.centerX,
-                        centerY: t.centerY,
-                        terrain: t.terrain,
-                        bonusResource: t.bonusResource
-                    }))
-                });
-                
-                console.log(`🗑️ Données du joueur invité ${player.name} supprimées`);
             }
             
-            // Retirer le joueur de son équipe
-            if (player.team && gameState.teams[player.team]) {
-                gameState.teams[player.team].players = 
-                    gameState.teams[player.team].players.filter(id => id !== socket.id);
-            }
+            gameState.teams[player.team].players = 
+                gameState.teams[player.team].players.filter(id => id !== socket.id);
             
             gameState.players.delete(socket.id);
             
